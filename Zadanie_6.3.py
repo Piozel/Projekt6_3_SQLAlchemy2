@@ -9,14 +9,14 @@ stations_csv_path = r'clean_stations.csv'
 measure_csv_path = r'clean_measure.csv'
 
 # Baza danych
-DATABASE_URL = "sqlite:///stations.db"  # Poprawiona nazwa
+DATABASE_URL = "sqlite:///stations.db"
 
 # Tworzymy bazę ORM
 Base = declarative_base()
 
 # Model tabeli stacji
 class Station(Base):
-    __tablename__ = 'stations'  # Poprawiona nazwa
+    __tablename__ = 'stations'
     id = Column(Integer, primary_key=True, autoincrement=True)
     station = Column(String, unique=True, nullable=False)
     latitude = Column(Float, nullable=False)
@@ -30,7 +30,7 @@ class Station(Base):
 class Measurement(Base):
     __tablename__ = 'measurements'
     id = Column(Integer, primary_key=True, autoincrement=True)
-    station = Column(String, ForeignKey('stations.station'), nullable=False)  # Poprawiona relacja
+    station = Column(String, ForeignKey('stations.station'), nullable=False)
     date = Column(Date, nullable=False)
     precip = Column(Float, nullable=False)
     tobs = Column(Float, nullable=False)
@@ -59,10 +59,10 @@ def import_stations(stations_csv_path):
                 )
                 for row in reader
             ]
-        session = Session()
+        session = Session()   # tworzy połączenie z bazą danych.Dopiero teraz możemy dodawać, pobierać i modyfikować dane.
         try:
-            session.bulk_save_objects(stations_data)
-            session.commit()
+            session.bulk_save_objects(stations_data)  # Dodaje wiele obiektów do sesji (ale jeszcze nie zapisuje ich w bazie).
+            session.commit() #Zatwierdza transakcję, czyli zapisuje wszystkie zmiany w bazie. Bez commit(), dane byłyby jedynie w pamięci i nie zostałyby zapisane do pliku SQLite.
             print(f"Zaimportowano {len(stations_data)} stacji.")
         except Exception as e:
             session.rollback()
@@ -107,21 +107,91 @@ def import_measurements(measure_csv_path):
     except Exception as e:
         print(f"Wystąpił nieoczekiwany błąd: {e}")
 
-# Główne wywołanie programu
+# Dodanie podstawowych operacji SQLAlchemy
+def insert_station(station, latitude, longitude, elevation, name, country, state):
+    session = Session()
+    new_station = Station(
+        station=station,
+        latitude=latitude,
+        longitude=longitude,
+        elevation=elevation,
+        name=name,
+        country=country,
+        state=state
+    )
+    try:
+        session.add(new_station)
+        session.commit()
+        print(f"Dodano stację: {name}")
+    except Exception as e:
+        session.rollback()
+        print(f"Błąd dodawania stacji: {e}")
+    finally:
+        session.close()
+
+def update_station_name(station_code, new_name):
+    session = Session()
+    try:
+        station = session.query(Station).filter_by(station=station_code).first()
+        if station:
+            station.name = new_name
+            session.commit()
+            print(f"Zaktualizowano nazwę stacji {station_code} na {new_name}")
+        else:
+            print("Stacja nie znaleziona.")
+    except Exception as e:
+        session.rollback()
+        print(f"Błąd aktualizacji: {e}")
+    finally:
+        session.close()
+
+def get_stations_by_country(country):
+    session = Session()
+    try:
+        stations = session.query(Station).filter_by(country=country).all()
+        for station in stations:
+            print(station.id, station.name, station.state)
+    except Exception as e:
+        print(f"Błąd pobierania danych: {e}")
+    finally:
+        session.close()
+
+def delete_station(station_code):
+    session = Session()
+    try:
+        station = session.query(Station).filter_by(station=station_code).first()
+        if station:
+            session.delete(station)
+            session.commit()
+            print(f"Usunięto stację: {station_code}")
+        else:
+            print("Stacja nie znaleziona.")
+    except Exception as e:
+        session.rollback()
+        print(f"Błąd usuwania: {e}")
+    finally:
+        session.close()
+
+
 if __name__ == "__main__":
-    # Usuwamy starą bazę danych, jeśli istnieje
+    # Zamykamy połączenie z bazą przed usunięciem pliku
+    engine.dispose()
+
     if os.path.exists("stations.db"):  
-        os.remove("stations.db")
+        try:
+            os.remove("stations.db")
+            print("Usunięto starą bazę danych.")
+        except PermissionError:
+            print("Nie można usunąć pliku bazy danych. Upewnij się, że nie jest otwarty w innym programie.")
 
     # Tworzymy nową bazę i tabele
+    engine = create_engine(DATABASE_URL, echo=False)
     Base.metadata.create_all(engine)
 
-    # Importujemy dane
     import_stations(stations_csv_path)
     import_measurements(measure_csv_path)
 
-    # Sprawdzamy dane przez ORM
-    with Session() as session:
-        stations = session.query(Station).limit(5).all()
-        for station in stations:
-            print(station.id, station.name, station.country)
+    insert_station("TEST001", 52.23, 21.01, 100, "Test Station", "Poland", "Mazowieckie")
+    update_station_name("TEST001", "Updated Test Station")
+    get_stations_by_country("Poland")
+    delete_station("TEST001")
